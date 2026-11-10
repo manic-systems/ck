@@ -1,0 +1,16 @@
+*
+
+!.cade
+!.editorconfig
+!.gitignore
+!LICENSE
+!README.md
+!flake.lock
+!flake.nix
+
+!ck/
+!ck/**
+!assets/
+!assets/**
+!nix/
+!nix/**
