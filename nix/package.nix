@@ -8,6 +8,8 @@ stdenvNoCC.mkDerivation {
   pname = "ck";
   version = "0.1.0";
 
+  __structuredAttrs = true;
+
   src =
     let
       fs = lib.fileset;
@@ -27,14 +29,13 @@ stdenvNoCC.mkDerivation {
     module="$out/share/nushell/ck"
     install -Dm644 -t "$module" ck/*.nu
 
-    # Interactive shells: nushell autoloads share/nushell/vendor/autoload from
+    # Nushell autoloads share/nushell/vendor/autoload from
     # every profile on XDG_DATA_DIRS, so installing the package is enough.
     mkdir -p "$out/share/nushell/vendor/autoload"
     echo "use $module *" > "$out/share/nushell/vendor/autoload/ck.nu"
 
-    # Everyone else (scripts, agents, other shells) gets a `ck` binary with the
-    # same subcommands. It cannot change its caller's directory, so `ck` and
-    # `ck get` print the clone's path instead.
+    # Everyone else gets a `ck` binary with the
+    # same subcommands.
     install -Dm644 ck/mod.nu "$out/libexec/ck/ck"
     substituteInPlace "$out/libexec/ck/ck" \
       --replace-fail "use config.nu" "use $module/config.nu" \
@@ -55,10 +56,18 @@ stdenvNoCC.mkDerivation {
   installCheckPhase = ''
     runHook preInstallCheck
 
-    export HOME="$TMPDIR" XDG_CONFIG_HOME="$TMPDIR/config"
-    $out/bin/ck --help > /dev/null
-    $out/bin/ck config > /dev/null
-    nu --no-config-file --commands "source $out/share/nushell/vendor/autoload/ck.nu; ck config | ignore"
+    export HOME="$TMPDIR"
+    nu --no-config-file --commands '
+      let files = (glob $"($env.out)/share/nushell/**/*.nu" | append $"($env.out)/libexec/ck/ck")
+      let bad = ($files | each {|file|
+        nu --no-config-file --ide-check 100 $file
+        | lines
+        | each { from json }
+        | where type == diagnostic
+        | each {|d| print --stderr $"($file): ($d | to json --raw)"; $d }
+      } | flatten)
+      if ($bad | is-not-empty) { exit 1 }
+    '
 
     runHook postInstallCheck
   '';
