@@ -78,10 +78,15 @@ export def target [url: string] {
     {path: ($root | path join ...$repo.parts)}
 }
 
-# jj repos at or below DIR, without descending into repos.
+# jj repos at or below DIR, without descending into repos. Plain git repos are
+# not jj repos and are skipped whole.
 export def find-repos [dir: path] {
     if ($dir | path join ".jj" | path exists) {
         return [$dir]
+    }
+
+    if ($dir | path join ".git" | path exists) {
+        return []
     }
 
     ls --all $dir | where type == dir | get name | par-each {|d| find-repos $d } | flatten
