@@ -22,7 +22,7 @@ use tidy.nu *
 export def --env main [
     query?: string@complete-clones
 ] {
-    let path = (jump (matching $query) $query)
+    let path = (jump (matching (settings) $query) $query)
     if not $nu.is-interactive { $path }
 }
 
@@ -35,7 +35,8 @@ export def --env "ck get" [
     --branch (-b): string         # Only fetch this branch.
     --ssh (-p)                    # Clone shorthands over SSH instead of HTTPS.
 ] {
-    let repo = (resolve $repo $ssh)
+    let s = (settings)
+    let repo = (resolve $s $repo $ssh)
 
     if ($repo.path | path exists) {
         if not ($repo.path | path join ".jj" | path exists) {
@@ -62,7 +63,7 @@ export def --env "ck get" [
 
     if $clone.exit_code != 0 {
         rm --recursive --force $repo.path
-        prune-empty $repo.path
+        prune-empty $s $repo.path
         error make {msg: $"jj git clone failed with exit code ($clone.exit_code): ($repo.url)"}
     }
 
@@ -77,7 +78,8 @@ export def "ck list" [
     --exact (-e)      # QUERY must be the repo, owner/repo, or the full name.
     --full-path (-p)  # Only print full paths.
 ] {
-    let found = if $exact { matching --exact $query } else { matching $query }
+    let s = (settings)
+    let found = if $exact { matching --exact $s $query } else { matching $s $query }
     if $full_path { $found | get path } else { $found }
 }
 
@@ -87,7 +89,8 @@ export def --env "ck rm" [
     --dry-run (-n)  # Only print what would be removed.
     --yes (-y)      # Do not ask.
 ] {
-    let found = (matching --exact $repo)
+    let s = (settings)
+    let found = (matching --exact $s $repo)
 
     if ($found | length) != 1 {
         let names = ($found | get name | str join ", ")
@@ -131,11 +134,11 @@ export def --env "ck rm" [
 
     # Step out of the clone, or out of a parent that pruning may remove.
     let pwd = $env.PWD
-    if $pwd == $path or ($pwd | str starts-with $"($path)/") or ($path | str starts-with $"($pwd)/") and $pwd not-in (all-roots) {
-        cd (base-dir)
+    if $pwd == $path or ($pwd | str starts-with $"($path)/") or ($path | str starts-with $"($pwd)/") and $pwd not-in (all-roots $s) {
+        cd (base-dir $s)
     }
     ^rm --recursive --force $path
-    prune-empty $path
+    prune-empty $s $path
 }
 
 # Start a new repo in the layout, with origin already set, and jump to it.
@@ -144,7 +147,7 @@ export def --env "ck new" [
     --template (-t): string     # Flake template for `nix flake init -t`.
     --https                     # Set origin over HTTPS instead of SSH.
 ] {
-    let repo = (resolve $repo (not $https))
+    let repo = (resolve (settings) $repo (not $https))
 
     if ($repo.url? == null) or ($repo.path | path exists) {
         error make {msg: $"($repo.path) already exists"}
@@ -219,11 +222,12 @@ export def --env "ck tidy" [
     --apply                   # Carry out the plan.
     --me: string              # Comma-separated owners whose repos count as your forks.
 ] {
-    let me = if $me == null { (settings).me } else { $me | split row "," | str trim | compact --empty }
-    let base = (base-dir)
+    let s = (settings)
+    let me = if $me == null { $s.me } else { $me | split row "," | str trim | compact --empty }
+    let base = (base-dir $s)
     let plans = (
-        clones
-        | par-each {|c| tidy-plan $c.path $me }
+        clones $s
+        | par-each {|c| tidy-plan $s $c.path $me }
         | where ($it.steps | is-not-empty) or $it.target != null or $it.issue != null
         | sort-by root
     )
@@ -237,9 +241,9 @@ export def --env "ck tidy" [
         return (
             $plans | each {|p|
                 {
-                    repo: (show $p.root)
+                    repo: (show $s $p.root)
                     remotes: ($p.steps | each { str join " " } | str join "\n")
-                    move: (if $p.target != null { show $p.target })
+                    move: (if $p.target != null { show $s $p.target })
                     issue: $p.issue
                 }
             }
@@ -252,7 +256,7 @@ export def --env "ck tidy" [
         }
         if $p.target != null {
             if ($p.target | path exists) {
-                print $"(ansi yellow)skipped move(ansi reset) (show $p.root): ($p.target) already exists"
+                print $"(ansi yellow)skipped move(ansi reset) (show $s $p.root): ($p.target) already exists"
                 continue
             }
             mkdir ($p.target | path dirname)
@@ -262,13 +266,13 @@ export def --env "ck tidy" [
             if not $inside and ($p.root | str starts-with $"($pwd)/") { cd $base }
             mv $p.root $p.target
             if $inside { cd ($p.target | path join ($pwd | path relative-to $p.root)) }
-            prune-empty $p.root
+            prune-empty $s $p.root
         }
-        print $"(ansi green)tidied(ansi reset) (show $p.root)"
+        print $"(ansi green)tidied(ansi reset) (show $s $p.root)"
     }
 
     for p in ($plans | where issue != null) {
-        print $"(ansi yellow)skipped(ansi reset) (show $p.root): ($p.issue)"
+        print $"(ansi yellow)skipped(ansi reset) (show $s $p.root): ($p.issue)"
     }
 }
 

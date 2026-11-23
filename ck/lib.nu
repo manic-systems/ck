@@ -2,10 +2,10 @@
 
 use config.nu *
 
-export def base-dir [] { (settings).base | path expand }
+export def base-dir [s: record] { $s.base | path expand }
 
-export def all-roots [] {
-    [(base-dir)] | append ((settings).roots | get --optional root | default [] | each { path expand }) | uniq
+export def all-roots [s: record] {
+    [(base-dir $s)] | append ($s.roots | get --optional root | default [] | each { path expand }) | uniq
 }
 
 # The forge and path of a clone URL, from URL-shaped remotes (https://...,
@@ -58,7 +58,7 @@ export def parts [url: string] {
 }
 
 # Where a clone of URL lives.
-export def target [url: string] {
+export def target [s: record, url: string] {
     let repo = (parts $url)
 
     if ($repo.error? != null) {
@@ -66,7 +66,6 @@ export def target [url: string] {
     }
 
     let name = ($repo.parts | str join "/")
-    let s = (settings)
     let root = (
         $s.roots
         | where {|r| $"($name)/" | str starts-with $r.prefix }
@@ -92,8 +91,8 @@ export def find-repos [dir: path] {
     ls --all $dir | where type == dir | get name | par-each {|d| find-repos $d } | flatten
 }
 
-export def clones [] {
-    all-roots
+export def clones [s: record] {
+    all-roots $s
     | where ($it | path exists)
     | each {|root|
         find-repos $root | each {|path| {name: ($path | path relative-to $root), path: $path} }
@@ -102,8 +101,8 @@ export def clones [] {
     | sort-by name
 }
 
-export def matching [query?: string, --exact] {
-    let all = (clones)
+export def matching [s: record, query?: string, --exact] {
+    let all = (clones $s)
 
     if ($query | is-empty) {
         return $all
@@ -122,7 +121,7 @@ export def matching [query?: string, --exact] {
     }
 }
 
-export def complete-clones [] { clones | get name }
+export def complete-clones [] { clones (settings) | get name }
 
 export def --env jump [found: list<record>, query?: string] {
     let chosen = match ($found | length) {
@@ -137,8 +136,8 @@ export def --env jump [found: list<record>, query?: string] {
 }
 
 # Remove DIR's parents that are left empty, up to the root holding it.
-export def prune-empty [dir: path] {
-    let stop = (all-roots)
+export def prune-empty [s: record, dir: path] {
+    let stop = (all-roots $s)
     mut dir = ($dir | path dirname)
 
     while $dir not-in $stop and ($dir | path exists) and (ls -a $dir | is-empty) {
@@ -158,8 +157,8 @@ export def sole-workspace [dir: path] {
 }
 
 # PATH relative to the base dir, or in full if it's located elsewhere.
-export def show [path: path] {
-    try { $path | path relative-to (base-dir) } catch { $path }
+export def show [s: record, path: path] {
+    try { $path | path relative-to (base-dir $s) } catch { $path }
 }
 
 export def remote-url [host: string, path: list<string>, ssh: bool] {
@@ -169,18 +168,17 @@ export def remote-url [host: string, path: list<string>, ssh: bool] {
 
 # Turn a <repo> spec into {url, path}, or {path} for a bare name that matches
 # exactly one local clone.
-export def resolve [spec: string, ssh: bool] {
+export def resolve [s: record, spec: string, ssh: bool] {
     if (is-url $spec) {
-        let target = (target $spec)
+        let target = (target $s $spec)
         if ($target.error? != null) { error make {msg: $target.error} }
         return {url: $spec, path: $target.path}
     }
 
     let p = ($spec | str trim --char "/" | split row "/")
-    let s = (settings)
 
     if ($p | length) == 1 {
-        let local = (matching --exact $spec)
+        let local = (matching --exact $s $spec)
         if ($local | length) == 1 {
             return {path: $local.0.path}
         }
@@ -196,5 +194,5 @@ export def resolve [spec: string, ssh: bool] {
         _ => (remote-url $s.host $p $ssh)
     }
 
-    {url: $url, path: (target $url).path}
+    {url: $url, path: (target $s $url).path}
 }

@@ -3,23 +3,23 @@
 use config.nu *
 use lib.nu [parts target sole-workspace]
 
-export def dealias [url: string] {
-    (settings).host_aliases
+export def dealias [s: record, url: string] {
+    $s.host_aliases
     | transpose alias host
     | reduce --fold $url {|a, url|
         $url | str replace --regex ('^((?:ssh://)?(?:[^@/:]+@)?)' + $a.alias + '([:/])') ('${1}' + $a.host + '${2}')
     }
 }
 
-export def tidy-plan [root: path, me: list<string>] {
+export def tidy-plan [s: record, root: path, me: list<string>] {
     let me = ($me | str lowercase)
-    let role_remotes = ((settings).role_remotes | append $me | uniq)
+    let role_remotes = ($s.role_remotes | append $me | uniq)
     let remotes = (
         ^jj git remote list --ignore-working-copy -R $root e> /dev/null
         | lines
         | parse "{name} {url}"
         | each {|r|
-            let url = (dealias $r.url)
+            let url = (dealias $s $r.url)
             let p = (parts $url).parts?
             $r | merge {
                 new_url: $url
@@ -67,7 +67,7 @@ export def tidy-plan [root: path, me: list<string>] {
         | append ($remotes | where name not-in $role_remotes and url != $it.new_url | each {|r| [set-url $r.name $r.new_url] })
     )
 
-    let target = (target $chosen.origin.new_url).path?
+    let target = (target $s $chosen.origin.new_url).path?
     let issue = if $target == null {
         "origin does not name a forge repo"
     } else if ($target | str starts-with $"($root)/") {
